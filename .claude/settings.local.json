@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/d/Downloads/A4/Main; cat DatabaseTable/headers/MyDB_BPlusTreeReaderWriter.h DatabaseTable/source/MyDB_BPlusTreeReaderWriter.cc BPlusTest/headers/StudentTestHelpers.h BPlusTest/source/StudentQUnitStage1.cc ../AILog/README.txt ../Build/SConstruct)",
+      "Read(//Users/d/Downloads/AILog/**)",
+      "Bash(/private/tmp/claude-501/-Users-d-Downloads-A4/7806b1e4-18b3-4569-a433-123709704da4/scratchpad/build.sh StudentQUnitStage1.cc /private/tmp/claude-501/-Users-d-Downloads-A4/7806b1e4-18b3-4569-a433-123709704da4/scratchpad/run/stage1)",
+      "Read(//private/tmp/claude-501/-Users-d-Downloads-A4/7806b1e4-18b3-4569-a433-123709704da4/tasks/**)",
+      "Bash(python3 -I -c ' *)"
+    ]
+  }
+}

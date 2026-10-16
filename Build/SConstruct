@@ -1,0 +1,82 @@
+
+from os import listdir
+from os.path import isfile, join, abspath
+
+common_env = Environment()
+common_env.Append(CXXFLAGS = '-std=c++14 -Wall -g -O0')
+
+# get the source files for the catalog
+srcDir = '../Main/Catalog/source'
+catalogSrc = [abspath(join(srcDir, f)) for f in listdir(srcDir) if isfile(join(srcDir, f)) and f[-3:] == '.cc']
+
+# get the source files for the buffer manager
+srcDir = '../Main/BufferMgr/source'
+bufferSrc = [abspath(join(srcDir, f)) for f in listdir(srcDir) if isfile(join(srcDir, f)) and f[-3:] == '.cc']
+
+# get the source files for the record manager
+srcDir = '../Main/Record/source'
+recordSrc = [abspath(join(srcDir, f)) for f in listdir(srcDir) if isfile(join(srcDir, f)) and f[-3:] == '.cc']
+
+# get the source files for the table/page reader-writers and the sort
+srcDir = '../Main/DatabaseTable/source'
+tableSrc = [abspath(join(srcDir, f)) for f in listdir(srcDir) if isfile(join(srcDir, f)) and f[-3:] == '.cc']
+
+# get the headers paths.  NOTE: do not put quotes around these!  SCons scans
+# these directories to work out which headers each source file depends on, and
+# a quoted path names a directory that does not exist -- the build still works,
+# but nothing is ever rebuilt when you edit a header
+header_paths = Split("""
+	../Main/Catalog/headers
+	../Main/BufferMgr/headers
+	../Main/Qunit/headers
+	../Main/Record/headers
+	../Main/DatabaseTable/headers
+	../Main/BPlusTest/headers
+""")
+
+# adds header folders
+common_env.Append(CPPPATH = header_paths)
+
+# Menu for selecting a specific build or all builds
+# if the -c or --clean option is included, the script will clean up
+# built and target files
+print("""
+What do you want to build/clean?\n
+1. Buffer unit tests
+2. Record unit tests
+3. Sort unit tests
+4. B+-tree unit tests (my tests, BPlusQUnit.cc)
+5. B+-tree Stage 1 tests (yours, StudentQUnitStage1.cc)
+6. B+-tree Stage 2 tests (yours, StudentQUnitStage2.cc)
+7. B+-tree Stage 3 tests (yours, StudentQUnitStage3.cc)
+8. B+-tree Stage 4 tests (yours, StudentQUnitStage4.cc)
+
+Add a "c" to build with clang++, as on Clear: for example, 5c
+""")
+
+ans = input("Select the module you want to build or clean. ").strip()
+
+if ans.endswith("c"):
+	common_env.Replace(CXX = "clang++")
+	ans = ans[:-1]
+
+if ans == "1":
+	print("\nOK, building buffer unit tests.")
+	common_env.Program ('bin/bufferUnitTest', ['../Main/BufferTest/source/BufferQUnit.cc', catalogSrc, recordSrc, bufferSrc])
+
+if ans == "2":
+	print("\nOK, building record unit tests.")
+	common_env.Program ('bin/recordUnitTest', ['../Main/RecordTest/source/RecordQUnit.cc', tableSrc, recordSrc, catalogSrc, bufferSrc])
+
+if ans == "3":
+	print("\nOK, building sort unit tests.")
+	common_env.Program ('bin/sortUnitTest', ['../Main/SortTest/source/SortQUnit.cc', tableSrc, recordSrc, catalogSrc, bufferSrc])
+
+if ans == "4":
+	print("\nOK, building B+-tree unit tests.")
+	common_env.Program ('bin/bplusUnitTest', ['../Main/BPlusTest/source/BPlusQUnit.cc', tableSrc, recordSrc, catalogSrc, bufferSrc])
+
+for stage in ("1", "2", "3", "4"):
+	if ans == str (4 + int (stage)):
+		print("\nOK, building your Stage " + stage + " tests.")
+		common_env.Program ('bin/studentUnitTestStage' + stage, ['../Main/BPlusTest/source/StudentQUnitStage' + stage + '.cc', tableSrc, recordSrc, catalogSrc, bufferSrc])
