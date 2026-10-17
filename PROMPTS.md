@@ -85,6 +85,17 @@ Main/BPlusTest/headers (the build picks them up automatically). No other
 existing file may be changed, and test code goes only in the stage's
 StudentQUnitStage2.cc file.
 
+When the leaves are filled and be appended, follow this procedure: copy all records and the appended one into temporary space; sort them with comparator; split them into two half with the median key, make sure both pages accommodate both half without overflow; arrange a new leaf and write lower half into it; larger half goes into original leaf. Make sure when duplicate key are split into two leaves, both leaves need to be accessed. Pass the root node with the maximum key of lower half, and insert it in sorted order. Place the entry exactly before the original leaf's directory entry.
+
+Testing: Write tests that correctly handle following circumstances in ‘StudentQUnitStage2.cc’ before actually writing the code. Keep the test scale small enough that the root does not overflow in stage 2.  
+- split of right leaf and left leaf
+- after split, all records remains intact
+- random insertion that might cause split
+- correct up-copy of key into directory root
+- duplicate key among two/several leaves
+- query across multiple leaves
+- insertion into root when root is full should raise an exception
+- tests in stage 1 should still function properly, except that Stage 2 split after full page
 
 
 ----------------------------------------------------------------------

@@ -24,10 +24,10 @@
 //  5. Duplicate keys are allowed; append () never drops or merges a record.
 //  6. append () starts at rootLocation and descends: on a directory page it
 //     follows the first entry whose key is >= the record's key; on a leaf it
-//     appends the record at the end of the page (leaves are not kept sorted).
-//  7. Leaf overflow (Stage 1 only, no splits): if the leaf has no room,
-//     append () prints an error and calls exit (1).  Stage 2 replaces this
-//     with a split.
+//     appends the record at the end of the page (leaves are not kept sorted,
+//     except that a split writes both halves in key order).
+//  7. Leaf overflow: Stage 1 printed an error and called exit (1).  From
+//     Stage 2 on, the leaf is split (decisions 11-16).
 //  8. Range iterators.  Both are one helper: collect, left to right, the
 //     leaves whose key range can overlap [low, high] (an entry's child is
 //     kept if its key >= low and the previous entry's key <= high; both
@@ -49,6 +49,45 @@
 //     getEmptyRecord ().
 //  10. Tests (StudentQUnitStage1.cc) check behaviour only, never the page
 //      layout, and never put more records in the tree than fit on one leaf.
+//
+// Stage 2: leaf splits.  The root is still one page.
+//
+//  11. Split procedure.  When the leaf that append () reaches is full, its
+//      records and the new one are copied into an in-memory vector (each
+//      into its own record object) and sorted on the key with
+//      buildComparator ().  The lower part goes to a new leaf, page
+//      getNumPages () (the end of the file); the upper part is written back
+//      into the original leaf, which is cleared first.
+//  12. Split point.  Every position k (records [0, k) below, [k, n) above,
+//      both nonempty) is tried; among those where both parts fit on a page
+//      (page size minus the two-size_t page header), the one with the
+//      smallest difference in bytes between the parts is used (the first
+//      such k on a tie).  Records vary in size, so splitting by count can
+//      overflow a page.  If no k fits, append () throws runtime_error.
+//  13. Separator.  The new directory entry is (largest key of the lower
+//      part, new leaf), inserted into the parent just before the original
+//      leaf's entry; the parent page is rewritten in order.  The original
+//      leaf's entry is unchanged.
+//  14. Duplicates.  Copies of one key may end up in both leaves (or many).
+//      Appends follow the first entry whose key >= the record's key, so new
+//      copies of a separator key go to the left leaf; range queries keep a
+//      child whose key >= low and whose predecessor's key <= high (decision
+//      8, both inclusive), so every leaf that can hold the key is read.
+//  15. Full root.  The root does not split until Stage 3.  If the root has
+//      no room for the new entry, append () throws runtime_error.  Both
+//      throws (decisions 12 and 15) happen after the split has been worked
+//      out but before any page is written, so the tree is left unchanged.
+//      The full root is deliberately not tested (the graded tests run
+//      against a tree that splits its root).
+//  16. append (int, rec) is only called on directory pages (the root always
+//      is one); it handles a leaf child itself, so that it can check its own
+//      room before the leaf is changed.
+//  17. Tests (StudentQUnitStage2.cc) compare every answer with an oracle (a
+//      multiset of (key, payload) pairs), check whole records (payload with
+//      its key), never assume where a split falls or which separator is
+//      chosen (every key and pair of neighbouring keys is queried), always
+//      run the unsorted iterator before the sorted one, and keep the root
+//      from filling.
 // ---------------------------------------------------------------------
 
 #include "MyDB_INRecord.h"
@@ -57,6 +96,7 @@
 #include "MyDB_PageListIteratorSelfSortingAlt.h"
 #include "RecordComparator.h"
 #include <algorithm>
+#include <stdexcept>
 
 MyDB_BPlusTreeReaderWriter :: MyDB_BPlusTreeReaderWriter (string orderOnAttName, MyDB_TablePtr forMe, 
 	MyDB_BufferManagerPtr myBuffer) : MyDB_TableReaderWriter (forMe, myBuffer) {
@@ -168,33 +208,135 @@ void MyDB_BPlusTreeReaderWriter :: append (MyDB_RecordPtr appendMe) {
 
 void MyDB_BPlusTreeReaderWriter :: append (int whichPage, MyDB_RecordPtr appendMe) {
 
+	// whichPage is a directory page (the root always is).  Copy out its entries
 	MyDB_PageReaderWriter page = (*this)[whichPage];
+	vector <MyDB_INRecordPtr> entries;
+	readDirectory (page, entries);
 
-	// a leaf: put the record at the end.  There are no splits in Stage 1
-	if (page.getType () == MyDB_PageType :: RegularPage) {
-		if (!page.append (appendMe)) {
-			cout << "B+-tree: leaf page " << whichPage << " is full, and splits are not implemented.\n";
-			exit (1);
-		}
+	// find the first entry whose key >= the record's key
+	size_t i = 0;
+	while (i < entries.size () && buildComparator (entries[i], appendMe) ())
+		i++;
+
+	// cannot happen: the last entry of every directory page has the max key
+	if (i == entries.size ()) {
+		cout << "B+-tree: directory page " << whichPage << " has no entry for the key "
+			<< getKey (appendMe)->toString () << ".\n";
+		exit (1);
+	}
+
+	// a directory child: descend (only the root is a directory in Stage 2)
+	int whichChild = entries[i]->getPtr ();
+	MyDB_PageReaderWriter child = (*this)[whichChild];
+	if (child.getType () == MyDB_PageType :: DirectoryPage) {
+		append (whichChild, appendMe);
 		return;
 	}
 
-	// a directory page: descend into the first child whose key >= the record's key
-	MyDB_INRecordPtr entry = getINRecord ();
-	function <bool ()> entryBelowRec = buildComparator (entry, appendMe);
-	MyDB_RecordIteratorAltPtr myIter = page.getIteratorAlt ();
-	while (myIter->advance ()) {
-		myIter->getCurrent (entry);
-		if (!entryBelowRec ()) {
-			append (entry->getPtr (), appendMe);
-			return;
+	// a leaf child with room: done
+	if (child.append (appendMe))
+		return;
+
+	// a full leaf child: split it, provided this page can take one more entry
+	size_t used = 0;
+	for (MyDB_INRecordPtr e : entries)
+		used += e->getBinarySize ();
+	size_t capacity = pageCapacity (page);
+	MyDB_INRecordPtr newEntry = splitLeaf (whichChild, appendMe,
+		[used, capacity] (MyDB_INRecordPtr e) {return used + e->getBinarySize () <= capacity;});
+
+	if (newEntry == nullptr)
+		throw runtime_error ("B+-tree: directory page " + to_string (whichPage) +
+			" is full, and internal splits are not implemented");
+
+	// rewrite this page with the new entry just before the split leaf's entry
+	entries.insert (entries.begin () + i, newEntry);
+	page.clear ();
+	page.setType (MyDB_PageType :: DirectoryPage);
+	for (MyDB_INRecordPtr e : entries)
+		page.append (e);
+}
+
+MyDB_INRecordPtr MyDB_BPlusTreeReaderWriter :: splitLeaf (int whichLeaf, MyDB_RecordPtr appendMe,
+	function <bool (MyDB_INRecordPtr)> canAddEntry) {
+
+	// copy the leaf's records and the new one into memory, and sort them on the key
+	MyDB_PageReaderWriter leaf = (*this)[whichLeaf];
+	vector <MyDB_RecordPtr> recs;
+	readLeaf (leaf, recs);
+	recs.push_back (appendMe);
+	std::stable_sort (recs.begin (), recs.end (),
+		[this] (MyDB_RecordPtr a, MyDB_RecordPtr b) {return buildComparator (a, b) ();});
+
+	// pick the split point
+	int k = chooseSplit (recs, pageCapacity (leaf));
+	if (k < 0)
+		throw runtime_error ("B+-tree: leaf page " + to_string (whichLeaf) +
+			" cannot be split so that both halves fit on a page");
+
+	// the entry for the lower half: its largest key, and the page it will go to
+	MyDB_INRecordPtr newEntry = getINRecord ();
+	newEntry->setKey (getKey (recs[k - 1]));
+	newEntry->setPtr (getNumPages ());
+	if (!canAddEntry (newEntry))
+		return nullptr;
+
+	// the lower half goes to a new leaf, the upper half back into the original
+	MyDB_PageReaderWriter lower = (*this)[getNumPages ()];
+	for (int j = 0; j < k; j++)
+		lower.append (recs[j]);
+	leaf.clear ();
+	for (size_t j = k; j < recs.size (); j++)
+		leaf.append (recs[j]);
+
+	return newEntry;
+}
+
+int MyDB_BPlusTreeReaderWriter :: chooseSplit (vector <MyDB_RecordPtr> &recs, size_t capacity) {
+
+	size_t total = 0;
+	for (MyDB_RecordPtr r : recs)
+		total += r->getBinarySize ();
+
+	// try every split point; lowerBytes is the size of records [0, k)
+	int best = -1;
+	size_t bestDiff = 0, lowerBytes = 0;
+	for (size_t k = 1; k < recs.size (); k++) {
+		lowerBytes += recs[k - 1]->getBinarySize ();
+		size_t upperBytes = total - lowerBytes;
+		if (lowerBytes > capacity || upperBytes > capacity)
+			continue;
+		size_t diff = lowerBytes > upperBytes ? lowerBytes - upperBytes : upperBytes - lowerBytes;
+		if (best == -1 || diff < bestDiff) {
+			best = (int) k;
+			bestDiff = diff;
 		}
 	}
+	return best;
+}
 
-	// cannot happen: the last entry of every directory page has the max key
-	cout << "B+-tree: directory page " << whichPage << " has no entry for the key "
-		<< getKey (appendMe)->toString () << ".\n";
-	exit (1);
+void MyDB_BPlusTreeReaderWriter :: readLeaf (MyDB_PageReaderWriter &page, vector <MyDB_RecordPtr> &recs) {
+	MyDB_RecordIteratorAltPtr myIter = page.getIteratorAlt ();
+	while (myIter->advance ()) {
+		MyDB_RecordPtr rec = getEmptyRecord ();
+		myIter->getCurrent (rec);
+		recs.push_back (rec);
+	}
+}
+
+void MyDB_BPlusTreeReaderWriter :: readDirectory (MyDB_PageReaderWriter &page, vector <MyDB_INRecordPtr> &entries) {
+	MyDB_RecordIteratorAltPtr myIter = page.getIteratorAlt ();
+	while (myIter->advance ()) {
+		MyDB_INRecordPtr entry = getINRecord ();
+		myIter->getCurrent (entry);
+		entries.push_back (entry);
+	}
+}
+
+size_t MyDB_BPlusTreeReaderWriter :: pageCapacity (MyDB_PageReaderWriter &page) {
+	// MyDB_PageReaderWriter keeps the page type and the bytes used, one size_t
+	// each, at the start of the page
+	return page.getPageSize () - 2 * sizeof (size_t);
 }
 
 bool MyDB_BPlusTreeReaderWriter :: isValid () {

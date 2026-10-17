@@ -26,6 +26,8 @@
 #include <algorithm>
 #include <climits>
 #include <sstream>
+#include <set>
+#include <random>
 
 #define FALLTHROUGH_INTENDED do {} while (0)
 
@@ -174,6 +176,93 @@ inline void parseArgs (int argc, char *argv[], int &start, bool &only) {
 	if (argc > 2 && string (argv[2]) == "only")
 		only = true;
 	cout << "start from test " << start << (only ? " (only)" : "") << endl << flush;
+}
+
+// ---------------------------------------------------------------------
+// Oracle helpers (Stage 2 on).  An Oracle is an independent model of the
+// tree: the multiset of every (key, payload) pair appended.  Checks compare
+// what the tree returns against it, record by record, so a record that is
+// lost, duplicated, or comes back with a damaged or different payload is
+// caught, and nothing depends on how a correct tree lays out its pages.
+// ---------------------------------------------------------------------
+
+typedef multiset <pair <int, string>> Oracle;
+
+// appends (key, payload) to the tree and to the oracle.  keySecond says the
+// tree uses keySecondSchema () rather than tinySchema ()
+inline void appendBoth (MyDB_BPlusTreeReaderWriter &tree, Oracle &oracle, int key, string payload,
+	bool keySecond = false) {
+	MyDB_RecordPtr rec = tree.getEmptyRecord ();
+	if (keySecond)
+		rec->fromString (payload + "|" + to_string (key) + "|");
+	else
+		fill (rec, key, payload);
+	tree.append (rec);
+	oracle.insert (make_pair (key, payload));
+}
+
+// the pairs in the oracle with low <= key <= high, sorted
+inline vector <pair <int, string>> oracleRange (Oracle &oracle, int lowKey, int highKey) {
+	vector <pair <int, string>> result;
+	for (auto it = oracle.lower_bound (make_pair (lowKey, string ())); it != oracle.end () && it->first <= highKey; ++it)
+		result.push_back (*it);
+	return result;
+}
+
+// checks the range [low, high] against the oracle: first with the unsorted
+// iterator (before any sorted query can reorder the leaves), then with the
+// sorted one, which must also return the keys in ascending order.  Both must
+// return exactly the oracle's (key, payload) pairs.  Returns true if all is well
+inline bool checkRange (QUnit::UnitTest &qunit, MyDB_BPlusTreeReaderWriter &tree, Oracle &oracle,
+	int lowKey, int highKey, bool keySecond = false) {
+
+	int keyAtt = keySecond ? 1 : 0;
+	int payloadAtt = keySecond ? 0 : 1;
+
+	vector <pair <int, string>> expected = oracleRange (oracle, lowKey, highKey);
+
+	vector <pair <int, string>> got = collectRange (tree, lowKey, highKey, false, keyAtt, payloadAtt);
+	std::sort (got.begin (), got.end ());
+	bool ok = (got == expected);
+
+	got = collectRange (tree, lowKey, highKey, true, keyAtt, payloadAtt);
+	ok = keysAscending (got) && ok;
+	std::sort (got.begin (), got.end ());
+	ok = (got == expected) && ok;
+
+	if (!ok)
+		cout << "  range [" << lowKey << ", " << highKey << "] does not match the oracle ("
+			<< expected.size () << " records expected)" << endl << flush;
+	QUNIT_IS_TRUE (ok);
+	return ok;
+}
+
+// checks the whole tree against the oracle: the full range, a full table
+// scan, and the point query [k, k] and the two-key ranges [k - 1, k] and
+// [k, k + 1] for every k in [lowKey, highKey].  Every possible split boundary
+// in that interval is therefore queried from both sides.  Stops after a few
+// failing queries, to keep the output readable
+inline void checkAll (QUnit::UnitTest &qunit, MyDB_BPlusTreeReaderWriter &tree, Oracle &oracle,
+	int lowKey, int highKey, bool keySecond = false) {
+
+	checkRange (qunit, tree, oracle, INT_MIN, INT_MAX, keySecond);
+	QUNIT_IS_EQUAL (countScan (tree), (int) oracle.size ());
+
+	int bad = 0;
+	for (int k = lowKey; k <= highKey; k++) {
+		if (bad > 5)
+			break;
+		if (!checkRange (qunit, tree, oracle, k, k, keySecond)) bad++;
+		if (!checkRange (qunit, tree, oracle, k - 1, k, keySecond)) bad++;
+		if (!checkRange (qunit, tree, oracle, k, k + 1, keySecond)) bad++;
+	}
+}
+
+// the number of records of (key, payload) that fit on one page of pageSize bytes
+// (after the page's two-size_t header)
+inline int leafCapacity (MyDB_BPlusTreeReaderWriter &tree, size_t pageSize, string payload) {
+	MyDB_RecordPtr rec = tree.getEmptyRecord ();
+	return (int) ((pageSize - 2 * sizeof (size_t)) / fill (rec, 0, payload)->getBinarySize ());
 }
 
 #endif

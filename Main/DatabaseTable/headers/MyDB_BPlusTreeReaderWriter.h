@@ -72,9 +72,33 @@ private:
 	function <bool ()> buildComparator (MyDB_RecordPtr lhs, MyDB_RecordPtr rhs);
 
 	// appends appendMe into the subtree rooted at page whichPage: on a directory
-	// page, descends into the first child whose key is >= the record's key; on a
-	// leaf, appends the record to the page (Stage 1: exits if the leaf is full)
+	// page, descends into the first child whose key is >= the record's key; a
+	// full leaf child is split, and the new entry goes into this page.  Throws
+	// runtime_error, leaving the tree unchanged, if the split is impossible or
+	// this page has no room for the new entry (no internal splits until Stage 3)
 	void append (int whichPage, MyDB_RecordPtr appendMe);
+
+	// splits the full leaf at page whichLeaf to make room for appendMe, and
+	// returns the directory entry (largest key of the lower half, pointer to the
+	// new page that holds the lower half) to insert just before the leaf's own
+	// entry.  canAddEntry is called after the split has been worked out but
+	// before any page is written; if it returns false, nothing is written and
+	// nullptr is returned.  Throws runtime_error if no split point fits
+	MyDB_INRecordPtr splitLeaf (int whichLeaf, MyDB_RecordPtr appendMe,
+		function <bool (MyDB_INRecordPtr)> canAddEntry);
+
+	// given records sorted on the key, returns k such that records [0, k) and
+	// [k, n) each fit in capacity bytes with the smallest difference in bytes
+	// between the two halves, or -1 if no such k exists (both halves nonempty)
+	int chooseSplit (vector <MyDB_RecordPtr> &recs, size_t capacity);
+
+	// copies every data record on a leaf / every entry on a directory page
+	// into its own record object
+	void readLeaf (MyDB_PageReaderWriter &page, vector <MyDB_RecordPtr> &recs);
+	void readDirectory (MyDB_PageReaderWriter &page, vector <MyDB_INRecordPtr> &entries);
+
+	// the number of bytes a page can hold for records (page size minus header)
+	size_t pageCapacity (MyDB_PageReaderWriter &page);
 
 	// adds, in key order, every leaf page under page whichPage whose key range
 	// can overlap [low, high] to the list
