@@ -1,0 +1,112 @@
+start from test 1
+MODE: NEW (Stage 4 search: only the first kept child read for its type)
+
+TEST 1: cold queries on a deep int tree; the buffer holds the whole tree
+  4 levels, 210 pages
+  unsorted [300, 300], cold: needs 3 directory pages and 1 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         18.90
+    directory search                   3         0          0.00
+    child peek (type only)             3         3         13.17
+    leaf read by iterator              1         0          0.00
+    TOTAL                              8         4         14.60
+    temp-page loads 0, page writes 0
+  unsorted [120, 180], cold: needs 8 directory pages and 18 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         18.00
+    directory search                   8         4          9.88
+    child peek (type only)             8         8         10.61
+    leaf read by iterator             18        13          9.09
+    TOTAL                             35        26         10.02
+    temp-page loads 0, page writes 0
+  unsorted [-inf, 40], cold: needs 4 directory pages and 13 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         15.40
+    directory search                   4         1          8.60
+    child peek (type only)             4         4          9.88
+    leaf read by iterator             13        11          7.39
+    TOTAL                             22        17          8.52
+    temp-page loads 0, page writes 0
+  unsorted [560, +inf], cold: needs 4 directory pages and 12 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         14.20
+    directory search                   4         1          8.30
+    child peek (type only)             4         4          9.53
+    leaf read by iterator             12        10          7.30
+    TOTAL                             21        16          8.35
+    temp-page loads 0, page writes 0
+  unsorted [-50, 5], cold: needs 3 directory pages and 3 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         18.90
+    directory search                   3         0          0.00
+    child peek (type only)             3         3         12.73
+    leaf read by iterator              3         2         10.85
+    TOTAL                             10         6         13.13
+    temp-page loads 0, page writes 0
+  unsorted [-inf, +inf], cold: needs 36 directory pages and 174 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         17.50
+    directory search                  36        29         10.10
+    child peek (type only)            36        36          9.49
+    leaf read by iterator            174       144          8.04
+    TOTAL                            247       210          8.62
+    temp-page loads 0, page writes 0
+  unsorted [10000, 20000], cold: needs 3 directory pages and 1 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         18.20
+    directory search                   3         0          0.00
+    child peek (type only)             3         3         12.83
+    leaf read by iterator              1         0          0.00
+    TOTAL                              8         4         14.18
+    temp-page loads 0, page writes 0
+
+TEST 2: cold wide queries on supplier.tbl; the buffer (8 frames) is far smaller than the range
+Loaded 10000 records.
+  4 levels, 2950 pages
+  unsorted [1, 10000], cold: needs 80 directory pages and 2870 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         19.30
+    directory search                  80        76         10.40
+    child peek (type only)            80        80          8.89
+    leaf read by iterator           2870      2870          7.05
+    TOTAL                           3031      3027          7.18
+    temp-page loads 0, page writes 0
+    leaf loads per needed leaf: 1.03
+  unsorted [2000, 6000], cold: needs 35 directory pages and 1147 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         15.70
+    directory search                  35        31          9.85
+    child peek (type only)            35        35          8.93
+    leaf read by iterator           1147      1147          7.11
+    TOTAL                           1218      1214          7.24
+    temp-page loads 0, page writes 0
+    leaf loads per needed leaf: 1.03
+  unsorted [5000, 5100], cold: needs 4 directory pages and 30 leaves
+    category                    accesses     loads   us per load
+    root check (checkReset)            1         1         15.30
+    directory search                   4         1          8.80
+    child peek (type only)             4         4          9.30
+    leaf read by iterator             30        29          7.18
+    TOTAL                             39        35          7.70
+    temp-page loads 0, page writes 0
+    leaf loads per needed leaf: 1.03
+
+TEST 3: 300 point queries on supplier.tbl, 8 frames, alternating unsorted / sorted
+Loaded 10000 records.
+  point query  (average of 300)
+    category                    accesses     loads   us per load
+    root check (checkReset)         1.00      0.01         16.85
+    directory search                3.01      0.01         10.40
+    child peek (type only)          3.01      2.43         10.84
+    leaf read by iterator           1.29      0.28         11.02
+    TOTAL                           8.30      2.72         10.87
+    temp-page loads 0.00, page writes 0.64
+
+TEST 4: 3000 appends to a new supplier tree, 16 frames
+  append  (average of 3000)
+    category                    accesses     loads   us per load
+    root check (checkReset)         1.00      0.00          0.00
+    append                          4.03      1.14         10.34
+    TOTAL                           5.03      1.14         10.34
+    temp-page loads 0.00, page writes 1.07
+  3 levels, 356 pages at the end

@@ -32,12 +32,16 @@
 // separated from its key is caught.  No test assumes which separator key a
 // split chooses or where the split falls: boundaries are found by querying
 // every key from both sides.  The unsorted iterator always runs before the
-// sorted one, since a sorted query reorders the leaves in place.  The tests
-// stay small enough that the root never fills (the root does not split
-// until Stage 3).
+// sorted one, since a sorted query reorders the leaves in place.
+//
+// Stage 5: every test ends by asking isValid () (StudentValidHelpers.h),
+// and Tests 2 and 10 ask it after every append.  Test 15 checks a new,
+// empty tree.  Tests 16-21 damage a tree of one root over several leaves
+// through the public page interface, and expect isValid () to say false.
 // ---------------------------------------------------------------------
 
 #include "StudentTestHelpers.h"
+#include "StudentValidHelpers.h"
 #include <cstdio>
 
 // a fixed-width (8 character) payload that is unique for each i
@@ -45,6 +49,19 @@ static string pad (int i) {
 	char buf[32];
 	snprintf (buf, sizeof (buf), "p%07d", i);
 	return string (buf);
+}
+
+// Tests 16-21: a valid tree of one root over several leaves, keys 0, 10,
+// ..., 1990 (each once, scrambled), on 1024-byte pages
+static MyDB_BPlusTreeReaderWriterPtr flatTree (QUnit::UnitTest &qunit, MyDB_BufferManagerPtr &myMgr) {
+	MyDB_BPlusTreeReaderWriterPtr tree = makeTree (myMgr, 1024, 16);
+	Oracle oracle;
+	for (int i = 0; i < 200; i++)
+		appendBoth (*tree, oracle, 10 * ((i * 73) % 200), pad (i));
+	QUNIT_IS_EQUAL (walkTree (qunit, *tree), 2);
+	QUNIT_IS_TRUE (dirEntries (*tree, rootOf (*tree)).size () >= 3);
+	checkValid (qunit, *tree);
+	return tree;
 }
 
 int main (int argc, char *argv[]) {
@@ -65,6 +82,7 @@ int main (int argc, char *argv[]) {
 		MyDB_RecordPtr rec = tree->getEmptyRecord ();
 		tree->append (fill (rec, 7, "seven"));
 		QUNIT_IS_EQUAL (countRange (qunit, *tree, 7, 7, false), 1);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -84,10 +102,12 @@ int main (int argc, char *argv[]) {
 		for (int i = 0; i <= n; i++) {
 			int key = (i % 2 == 0) ? i / 2 : n - i / 2;
 			appendBoth (*tree, oracle, key, pad (key));
+			checkValid (qunit, *tree);
 			if (i == n - 1)
 				checkRange (qunit, *tree, oracle, INT_MIN, INT_MAX);
 		}
 		checkAll (qunit, *tree, oracle, -1, n + 1);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -113,6 +133,7 @@ int main (int argc, char *argv[]) {
 		QUNIT_IS_TRUE (exact);
 
 		checkAll (qunit, *tree, oracle, -1, 300);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -137,6 +158,7 @@ int main (int argc, char *argv[]) {
 		QUNIT_IS_TRUE (exact);
 
 		checkAll (qunit, *tree, oracle, -1, 300);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -161,6 +183,7 @@ int main (int argc, char *argv[]) {
 				checkRange (qunit, *tree, oracle, 490, 520);
 		}
 		checkAll (qunit, *tree, oracle, -1, 1000);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -190,6 +213,7 @@ int main (int argc, char *argv[]) {
 		QUNIT_IS_TRUE (res == expected);
 
 		checkAll (qunit, *tree, oracle, -1, 100);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -219,6 +243,7 @@ int main (int argc, char *argv[]) {
 			int b = (int) (gen () % 420) - 10;
 			checkRange (qunit, *tree, oracle, min (a, b), max (a, b));
 		}
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -253,6 +278,7 @@ int main (int argc, char *argv[]) {
 		for (int key = 149; key >= 0; key--)
 			appendBoth (*tree, oracle, key, pad (2000 + key));
 		checkAll (qunit, *tree, oracle, -1, 150);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -281,6 +307,7 @@ int main (int argc, char *argv[]) {
 		appendBoth (*tree, oracle, 6, pad (99));
 		checkAll (qunit, *tree, oracle, 2, 8);
 		QUNIT_IS_EQUAL ((int) collectRange (*tree, 5, 5, false).size (), 4 * n);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -304,6 +331,7 @@ int main (int argc, char *argv[]) {
 			else
 				key = 50;
 			appendBoth (*tree, oracle, key, pad (i));
+			checkValid (qunit, *tree);
 		}
 		checkAll (qunit, *tree, oracle, -1, 120);
 
@@ -311,6 +339,7 @@ int main (int argc, char *argv[]) {
 		for (int i = 0; i < n; i++)
 			appendBoth (*tree, oracle, 49 + i % 3, pad (5000 + i));
 		checkAll (qunit, *tree, oracle, -1, 120);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -340,6 +369,7 @@ int main (int argc, char *argv[]) {
 		QUNIT_IS_EQUAL (found, 0);
 		QUNIT_IS_EQUAL ((int) collectRange (*tree, 0, 998, false).size (), 500);
 		QUNIT_IS_EQUAL ((int) collectRange (*tree, 0, 998, true).size (), 500);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -361,6 +391,7 @@ int main (int argc, char *argv[]) {
 			QUNIT_IS_EQUAL (countScan (*tree), (int) oracle.size ());
 		}
 		checkAll (qunit, *tree, oracle, -1, 300);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -403,6 +434,7 @@ int main (int argc, char *argv[]) {
 			for (int i = 0; i < 6; i++)
 				appendBoth (*tree, oracle, i % 6, (i % 2) ? "c" + to_string (i) : string (100, 'a' + i));
 			checkAll (qunit, *tree, oracle, -1, 6);
+			checkValid (qunit, *tree);
 		}
 
 		// Part B.  Seeded payload lengths from 1 to 200 characters
@@ -417,6 +449,7 @@ int main (int argc, char *argv[]) {
 			appendBoth (*tree, oracle, key, payload);
 		}
 		checkAll (qunit, *tree, oracle, -1, 100);
+		checkValid (qunit, *tree);
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;
@@ -437,6 +470,103 @@ int main (int argc, char *argv[]) {
 		for (int i = 0; i < 150; i++)
 			appendBoth (*tree, oracle, (i * 7) % 150, pad (2000 + i), true);
 		checkAll (qunit, *tree, oracle, -1, 150, true);
+		checkValid (qunit, *tree);
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 15:
+	{
+		cout << "TEST 15: a new, empty tree is valid, and stays valid..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = makeTree (myMgr, 1024, 16);
+		checkValid (qunit, *tree);
+		checkBoth (qunit, *tree, INT_MIN, INT_MAX, 0);
+		checkValid (qunit, *tree);
+
+		Oracle oracle;
+		appendBoth (*tree, oracle, 3, "three");
+		checkValid (qunit, *tree);
+
+		// printTree () must leave it valid (its output is not checked)
+		{
+			ostringstream sink;
+			streambuf *saved = cout.rdbuf (sink.rdbuf ());
+			tree->printTree ();
+			cout.rdbuf (saved);
+		}
+		checkValid (qunit, *tree);
+		checkAll (qunit, *tree, oracle, 0, 5);
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 16:
+	{
+		cout << "TEST 16: invalid: a pointer to a page past the end of the file..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		QUNIT_IS_TRUE (corruptBadPointer (*tree));
+		expectInvalid (qunit, *tree, "a root entry points past the end of the file");
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 17:
+	{
+		cout << "TEST 17: invalid: directory keys out of order..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		QUNIT_IS_TRUE (corruptUnsortedRoot (*tree));
+		expectInvalid (qunit, *tree, "the first two root entries swapped");
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 18:
+	{
+		cout << "TEST 18: invalid: one leaf with two parent entries..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		QUNIT_IS_TRUE (corruptTwoParents (*tree));
+		expectInvalid (qunit, *tree, "two root entries point to the same leaf");
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 19:
+	{
+		cout << "TEST 19: invalid: a record on the wrong leaf..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		int key;
+		QUNIT_IS_TRUE (corruptWrongLeaf (*tree, key));
+
+		// a range query cannot find it: it is not under the entry for its key
+		QUNIT_IS_EQUAL ((int) collectRange (*tree, key, key, false).size (), 0);
+		expectInvalid (qunit, *tree, "a record above its leaf's upper bound");
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 20:
+	{
+		cout << "TEST 20: invalid: an empty leaf in a tree that is not empty..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		QUNIT_IS_TRUE (corruptEmptyLeaf (*tree));
+		expectInvalid (qunit, *tree, "the leftmost leaf emptied");
+	}
+	if (only) break;
+	FALLTHROUGH_INTENDED;
+
+	case 21:
+	{
+		cout << "TEST 21: invalid: the root's last key is not the maximum..." << endl << flush;
+		MyDB_BufferManagerPtr myMgr;
+		MyDB_BPlusTreeReaderWriterPtr tree = flatTree (qunit, myMgr);
+		QUNIT_IS_TRUE (corruptRootNotMax (*tree, 1990));
+		expectInvalid (qunit, *tree, "the root's last key lowered to the largest key, 1990");
 	}
 	if (only) break;
 	FALLTHROUGH_INTENDED;

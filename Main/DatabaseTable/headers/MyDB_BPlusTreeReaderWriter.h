@@ -71,26 +71,21 @@ private:
 	// build the comparator again
 	function <bool ()> buildComparator (MyDB_RecordPtr lhs, MyDB_RecordPtr rhs);
 
-	// appends appendMe into the subtree rooted at page whichPage: on a directory
-	// page, descends into the first child whose key is >= the record's key; a
-	// full leaf child is split, and the new entry goes into this page.  Throws
-	// runtime_error, leaving the tree unchanged, if the split is impossible or
-	// this page has no room for the new entry (no internal splits until Stage 3)
-	void append (int whichPage, MyDB_RecordPtr appendMe);
-
-	// splits the full leaf at page whichLeaf to make room for appendMe, and
-	// returns the directory entry (largest key of the lower half, pointer to the
-	// new page that holds the lower half) to insert just before the leaf's own
-	// entry.  canAddEntry is called after the split has been worked out but
-	// before any page is written; if it returns false, nothing is written and
-	// nullptr is returned.  Throws runtime_error if no split point fits
-	MyDB_INRecordPtr splitLeaf (int whichLeaf, MyDB_RecordPtr appendMe,
-		function <bool (MyDB_INRecordPtr)> canAddEntry);
-
 	// given records sorted on the key, returns k such that records [0, k) and
 	// [k, n) each fit in capacity bytes with the smallest difference in bytes
 	// between the two halves, or -1 if no such k exists (both halves nonempty)
 	int chooseSplit (vector <MyDB_RecordPtr> &recs, size_t capacity);
+
+	// given the entries of an overflowing directory page, in order, returns k
+	// such that entries [0, k) and [k, n) each fit in capacity bytes: k is the
+	// count median (n + 1) / 2 (the entry at (n - 1) / 2 moves up) if both
+	// halves fit there, otherwise the nearest k that fits (the smaller k on a
+	// tie), or -1 if none does (both halves nonempty)
+	int chooseDirectorySplit (vector <MyDB_INRecordPtr> &entries, size_t capacity);
+
+	// clears page, makes it a directory page, and writes entries [from, to) to
+	// it; throws runtime_error if any entry does not fit
+	void writeDirectory (MyDB_PageReaderWriter &page, vector <MyDB_INRecordPtr> &entries, size_t from, size_t to);
 
 	// copies every data record on a leaf / every entry on a directory page
 	// into its own record object
@@ -100,8 +95,19 @@ private:
 	// the number of bytes a page can hold for records (page size minus header)
 	size_t pageCapacity (MyDB_PageReaderWriter &page);
 
-	// adds, in key order, every leaf page under page whichPage whose key range
-	// can overlap [low, high] to the list
+	// makes this an empty tree: page 0 an empty leaf, page 1 a root with one
+	// entry (max key, page 0); sets rootLocation and the table's root location
+	void makeEmptyTree ();
+
+	// if loadFromTextFile () has emptied the file since the tree last looked
+	// (the last page is page 0, the root is past it, and page 0 is an empty
+	// leaf), starts again from an empty tree.  Called first by append (), the
+	// range iterators and printTree (); not by isValid (), which never writes
+	void checkReset ();
+
+	// adds, in key order, every leaf page under directory page whichPage
+	// whose key range can overlap [low, high] to the list, reading only the
+	// first such leaf under each directory page (to learn it is a leaf)
 	void discoverPages (int whichPage, vector <MyDB_PageReaderWriter> &list,
 		MyDB_AttValPtr low, MyDB_AttValPtr high);
 
@@ -111,6 +117,30 @@ private:
 
 	// prints the subtree rooted at page whichPage, indented by depth
 	void printTree (int whichPage, int depth);
+
+	// what isValid () knows as it walks the tree: the number of pages in the
+	// file, the depth of the first leaf found, the pages reached so far and
+	// the pages on the path from the root to the current page, and whether
+	// any violation has been found
+	struct ValidWalk {
+		int numPages;
+		int leafDepth;
+		vector <bool> seen;
+		vector <bool> onPath;
+		bool ok;
+	};
+
+	// prints one violation, "B+-tree isValid: page <whichPage>: <what>", and
+	// marks the walk as failed
+	void validReport (ValidWalk &walk, int whichPage, string what);
+
+	// checks the subtree under page whichPage (which must be a page of the
+	// file) at the given depth: every key in it must lie in [low, high] (no
+	// lower bound if low is nullptr), and a directory page's last key must
+	// equal high.  emptyLeafOK says whether whichPage may be an empty leaf
+	// (only the root's only child may be).  Reads pages; never writes
+	void validWalk (ValidWalk &walk, int whichPage, int depth, MyDB_INRecordPtr low,
+		MyDB_INRecordPtr high, bool emptyLeafOK);
 
 	// the location (page number) of the root in the tree
 	int rootLocation;
